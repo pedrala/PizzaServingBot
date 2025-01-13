@@ -1,18 +1,40 @@
+<?xml version="1.0"?>
 <package format="3">
   <name>pizza_serving_bot</name>
   <version>0.1.0</version>
-  <description>Pizza serving bot using ROS 2</description>
-  <maintainer email="you@example.com">Your Name</maintainer>
-  <license>Apache 2.0</license>
+  <description>Pizza Serving Robot System</description>
 
+  <maintainer email="pedralation@gmail.com">viator</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- 빌드 도구 의존성 -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>rclcpp</depend>
-  <depend>geometry_msgs</depend>
-  <depend>nav_msgs</depend>
-  <depend>nav2_msgs</depend>
-  <depend>Qt5Widgets</depend>
+  <!-- 빌드 의존성 -->
+  <build_depend>rclcpp</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>tf2_ros</build_depend>
+  <build_depend>tf2_geometry_msgs</build_depend>
+  <build_depend>Qt5</build_depend>
+  <build_depend>pizza_order_msgs</build_depend>
+  <build_depend>cpprestsdk</build_depend>
+  <build_depend>OpenCV</build_depend>
 
-  <build_depend>ament_cmake</build_depend>
-  <exec_depend>ament_cmake</exec_depend>
+  <!-- 실행 의존성 -->
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>Qt5</exec_depend>
+  <exec_depend>pizza_order_msgs</exec_depend>
+  <exec_depend>cpprestsdk</exec_depend>
+  <exec_depend>OpenCV</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>
