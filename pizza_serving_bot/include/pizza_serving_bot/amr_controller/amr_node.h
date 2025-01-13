@@ -1,36 +1,40 @@
-#ifndef YOUR_PACKAGE_NAME_AMR_NODE_H
-#define YOUR_PACKAGE_NAME_AMR_NODE_H
+#ifndef AMR_NODE_H
+#define AMR_NODE_H
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav2_msgs/action/navigate_to_pose.hpp>
-#include <rclcpp_action/rclcpp_action.hpp>
-#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
-#include <rclcpp/qos.hpp>
 #include <pizza_order_msgs/srv/goal_loc.hpp>
+#include <QWidget>
 
-#include "order_info_display_app.h"
+#include <vector>
+#include <string>
 
-class OrderInfoDisplayApp;
+struct TableCoordinate {
+    int table_number;
+    double x;
+    double y;
+};
 
-class AMRNode : public rclcpp::Node
-{
+class AMRNode : public rclcpp::Node {
 public:
     using NavigateToPose = nav2_msgs::action::NavigateToPose;
     using GoalLoc = pizza_order_msgs::srv::GoalLoc;
 
     AMRNode();
-    void setOrderDisplayApp(OrderInfoDisplayApp* app);
-
-    // 현재 위치 정보
-    geometry_msgs::msg::Point current_position_;
+    void set_order_display_app(QWidget* app);
 
     // 상태 정보
     int table_number_;
     int order_id_;
     std::string status_;
+
+    // 주문 정보 표시 앱
+    QWidget* order_display_app_;
 
     // 초기 위치 설정
     void set_initial_pose(double x, double y, double yaw);
@@ -54,18 +58,6 @@ private:
 
     void pose_callback(const nav_msgs::msg::Odometry::SharedPtr msg);
 
-    // 테이블 좌표 정보
-    struct TableCoordinate
-    {
-        int table_number;
-        double x;
-        double y;
-    };
-    std::vector<TableCoordinate> table_coordinates_;
-
-    // 초기 위치
-    TableCoordinate initial_position_;
-
     // 액션 클라이언트
     rclcpp_action::Client<NavigateToPose>::SharedPtr action_client_;
 
@@ -76,8 +68,17 @@ private:
     // 서비스 서버
     rclcpp::Service<GoalLoc>::SharedPtr goal_loc_service_;
 
-    // 주문 정보 표시 앱
-    OrderInfoDisplayApp* order_display_app_;
+    // 로봇의 현재 위치
+    geometry_msgs::msg::Point current_position_;
+
+    // 초기 위치
+    TableCoordinate initial_position_;
+
+    // 테이블 좌표 데이터
+    std::vector<TableCoordinate> table_coordinates_;
+
+    // 팝업 메시지 박스
+    QMessageBox* popup_msg_;
 };
 
-#endif  // YOUR_PACKAGE_NAME_AMR_NODE_H
+#endif  // AMR_NODE_H
