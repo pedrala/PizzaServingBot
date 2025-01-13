@@ -14,7 +14,7 @@ KitchenDisplay::KitchenDisplay(SignalBridge *signal_bridge, std::shared_ptr<Kitc
 
     rows_ = 2;
     cols_ = 4;
-    api_base_url_ = "http://localhost:5000/api";  // api_server.py에서 설정한 포트와 호스트를 사용합니다.
+    api_base_url_ = "http://192.168.0.18:5000/api";  // api_server.py에서 설정한 포트와 호스트를 사용합니다.
 
     QVBoxLayout *main_layout = new QVBoxLayout(this);
     QHBoxLayout *top_layout = new QHBoxLayout();
