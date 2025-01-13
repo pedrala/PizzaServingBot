@@ -1,0 +1,9 @@
+#Request
+int16 order_id 
+int16 table_number 
+string status 
+---
+#Response
+bool send_result
+float32 x
+float32 y
