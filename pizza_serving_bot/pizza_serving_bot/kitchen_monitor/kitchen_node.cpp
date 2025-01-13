@@ -5,7 +5,51 @@ using namespace web;
 using namespace web::http;
 using namespace web::http::client;
 
-// REST API 엔드포인트를 api_server.py에 맞게 수정합니다.
+KitchenServiceNode::KitchenServiceNode(SignalBridge *signal_bridge)
+    : Node("kitchen_service_node"), signal_bridge_(signal_bridge)
+{
+    // QoS 설정
+    auto qos_profile = rclcpp::QoS(rclcpp::KeepLast(10));
+    qos_profile.reliable();
+
+    // 주문 서비스 서버 설정
+    order_service_ = this->create_service<pizza_order_msgs::srv::OrderService>(
+        "process_order",
+        std::bind(&KitchenServiceNode::process_order_callback, this, std::placeholders::_1, std::placeholders::_2),
+        qos_profile);
+
+    // 주문취소 서비스 클라이언트 설정
+    cancel_client_ = this->create_client<pizza_order_msgs::srv::CancelService>(
+        "cancel_order", qos_profile);
+
+    // 직원 호출 구독 설정
+    call_manager_subscriber_ = this->create_subscription<pizza_order_msgs::msg::CallManager>(
+        "call_manager",
+        qos_profile,
+        std::bind(&KitchenServiceNode::call_manager_callback, this, std::placeholders::_1));
+
+    // 주문 정보와 Goal(테이블 위치) 클라이언트 설정
+    goal_client_ = this->create_client<pizza_order_msgs::srv::GoalLoc>(
+        "goal_loc", qos_profile);
+}
+
+void KitchenServiceNode::process_order_callback(
+    const std::shared_ptr<pizza_order_msgs::srv::OrderService::Request> request,
+    std::shared_ptr<pizza_order_msgs::srv::OrderService::Response> response)
+{
+    RCLCPP_INFO(this->get_logger(), "주문 처리 중: %d", request->order_id);
+    // 주문 처리 로직 추가
+    response->status = "Completed";
+}
+
+void KitchenServiceNode::call_manager_callback(
+    const pizza_order_msgs::msg::CallManager::SharedPtr msg)
+{
+    RCLCPP_INFO(this->get_logger(), "테이블번호 %d로부터 직원호출이 요청되었습니다.", msg->table_number);
+    QString popup_message = QString("테이블번호 %1로부터 직원호출이 요청되었습니다.").arg(msg->table_number);
+    emit signal_bridge_->table_call_signal(popup_message);
+}
+
 KitchenDisplay::KitchenDisplay(SignalBridge *signal_bridge, std::shared_ptr<KitchenServiceNode> service_node, QWidget *parent)
     : QWidget(parent), service_node_(service_node)
 {
@@ -14,7 +58,7 @@ KitchenDisplay::KitchenDisplay(SignalBridge *signal_bridge, std::shared_ptr<Kitc
 
     rows_ = 2;
     cols_ = 4;
-    api_base_url_ = "http://192.168.0.18:5000/api";  // api_server.py에서 설정한 포트와 호스트를 사용합니다.
+    api_base_url_ = "http://192.168.0.18:5000/api";
 
     QVBoxLayout *main_layout = new QVBoxLayout(this);
     QHBoxLayout *top_layout = new QHBoxLayout();
@@ -60,105 +104,166 @@ KitchenDisplay::KitchenDisplay(SignalBridge *signal_bridge, std::shared_ptr<Kitc
     load_orders();
 }
 
+void KitchenDisplay::show_popup_message(const QString &message)
+{
+    call_label_->setText(message);
+    QMessageBox::information(this, "Call Manager", message);
+}
+
+void KitchenDisplay::refresh_orders()
+{
+    load_orders();
+}
+
 void KitchenDisplay::load_orders()
 {
     // REST API를 사용하여 주문 정보 로드
     // cpprestsdk를 사용하여 HTTP GET 요청
     http_client client(U(api_base_url_.toStdString()));
-    uri_builder builder(U("/orders"));  // 엔드포인트 수정
+    uri_builder builder(U("/orders"));
 
     client.request(methods::GET, builder.to_string())
-    .then([this](http_response response) {
-        if (response.status_code() == status_codes::OK) {
-            return response.extract_json();
-        }
-        return pplx::task_from_result(json::value());
-    })
-    .then([this](json::value json_object) {
-        clear_order_cards();
-        if (!json_object.is_null()) {
-            auto orders_object = json_object.as_object();
-            for (auto const& order_pair : orders_object) {
-                int order_id = std::stoi(order_pair.first);
-                auto data = order_pair.second.as_object();
-
-                QString timestamp = QString::fromStdString(data["timestamp"].as_string());
-                int table_number = data["table_number"].as_integer();
-                QList<QString> menu_items;
-
-                for (auto const& item : data["menu_items"].as_array()) {
-                    menu_items.append(QString::fromStdString(item.as_string()));
-                }
-
-                add_order_card(order_id, timestamp, table_number, menu_items);
-            }
-        }
-        update_order_grid();
-    })
-    .wait();
-}
-
-// 주문 상태를 업데이트하는 함수 수정
-void KitchenDisplay::update_order_status(int order_id, const QString& status)
-{
-    try {
-        http_client client(U(api_base_url_.toStdString()));
-
-        // 상태에 따라 URL 수정 ('Cancelled' 또는 'Completed')
-        uri_builder builder(U("/order/" + std::to_string(order_id) + "/" + status.toStdString()));
-
-        client.request(methods::PUT, builder.to_string())
-        .then([order_id, status](http_response response) {
+        .then([this](http_response response) {
             if (response.status_code() == status_codes::OK) {
-                qDebug() << QString("Order %1 status updated to %2").arg(order_id).arg(status);
-            } else {
-                qDebug() << QString("Failed to update order status, status code: %1").arg(response.status_code());
+                return response.extract_json();
             }
+            return pplx::task_from_result(json::value());
+        })
+        .then([this](json::value json_object) {
+            clear_order_cards();
+            if (!json_object.is_null()) {
+                auto orders = json_object.as_object();
+                for (auto const& order_pair : orders) {
+                    int order_id = std::stoi(order_pair.first);
+                    auto data = order_pair.second.as_object();
+                    QString order_time = QString::fromStdString(data["timestamp"].as_string());
+                    int table_number = data["table_number"].as_integer();
+                    QList<QString> menu_items;
+                    for (auto const& item : data["menu_items"].as_array()) {
+                        menu_items.append(QString::fromStdString(item.as_string()));
+                    }
+                    add_order_card(order_id, order_time, table_number, menu_items);
+                }
+            }
+            update_order_grid();
         })
         .wait();
-
-        // 주문 새로고침
-        refresh_orders();
-
-    } catch (const std::exception& e) {
-        qDebug() << "Error updating order status:" << e.what();
-    }
 }
 
-// 주문 취소 함수 수정
-void KitchenDisplay::cancel_order(int order_id, int table_number, const QString& status)
+void KitchenDisplay::clear_order_cards()
 {
-    // CancelService 서비스 호출
-    auto request = std::make_shared<pizza_order_msgs::srv::CancelService::Request>();
-    request->order_id = order_id;
-    request->table_number = table_number;
-
-    auto result_future = service_node_->cancel_client_->async_send_request(request);
-
-    // 결과 처리
-    if (rclcpp::spin_until_future_complete(service_node_, result_future) ==
-        rclcpp::FutureReturnCode::SUCCESS)
-    {
-        auto response = result_future.get();
-        if (response->status == "Cancelled")
-        {
-            QMessageBox::information(this, "주문 취소", QString("주문 번호: %1번\n주문이 취소되었습니다.\n테이블 번호: %2").arg(order_id).arg(table_number));
-
-            // 주문 상태 업데이트
-            update_order_status(order_id, "Cancelled");
-        }
-        else
-        {
-            QMessageBox::warning(this, "주문 취소 실패", "주문 취소 요청이 실패했습니다.");
-        }
+    for (auto card : order_cards_) {
+        card->setParent(nullptr);
     }
-    else
-    {
-        QMessageBox::critical(this, "오류 발생", "주문 취소 처리 중 오류가 발생했습니다.");
+    order_cards_.clear();
+}
+
+void KitchenDisplay::add_order_card(int order_id, const QString &order_time, int table_number, const QList<QString> &menu_items)
+{
+    QGroupBox* card = create_order_card(order_id, order_time, table_number, menu_items);
+    order_cards_.append(card);
+}
+
+void KitchenDisplay::update_order_grid()
+{
+    // 기존 위젯 제거
+    QLayoutItem* item;
+    while ((item = grid_layout_->takeAt(0)) != nullptr) {
+        delete item->widget();
+        delete item;
+    }
+
+    // 주문 카드 추가
+    for (int index = 0; index < order_cards_.size(); ++index) {
+        int row = index / cols_;
+        int col = index % cols_;
+        grid_layout_->addWidget(order_cards_.at(index), row, col);
+    }
+
+    // 총 슬롯 수 계산
+    int total_slots = rows_ * cols_;
+
+    // 부족한 슬롯에 빈 공간 추가
+    for (int i = order_cards_.size(); i < total_slots; ++i) {
+        int row = i / cols_;
+        int col = i % cols_;
+        QLabel* placeholder = new QLabel("");
+        placeholder->setStyleSheet("background-color: #E0E0E0; border: 1px dashed gray;");
+        grid_layout_->addWidget(placeholder, row, col);
     }
 }
 
-// 주문 완료 함수 수정
+QGroupBox* KitchenDisplay::create_order_card(int order_id, const QString &order_time, int table_number, const QList<QString> &menu_items)
+{
+    QGroupBox* card = new QGroupBox();
+    QVBoxLayout* card_layout = new QVBoxLayout();
+    card_layout->setAlignment(Qt::AlignTop);
+
+    QLabel* order_id_label = new QLabel(QString("Order #%1").arg(order_id));
+    order_id_label->setFixedHeight(50);
+    order_id_label->setAlignment(Qt::AlignCenter);
+    order_id_label->setStyleSheet("font-size: 28px; font-weight: bold; color: green;");
+    card_layout->addWidget(order_id_label);
+
+    QHBoxLayout* order_info_layout = new QHBoxLayout();
+    QLabel* order_time_label = new QLabel(QString("TIME : %1").arg(order_time));
+    order_time_label->setFixedHeight(50);
+    order_time_label->setAlignment(Qt::AlignCenter);
+    QLabel* table_number_label = new QLabel(QString("TABLE : %1").arg(table_number));
+    table_number_label->setFixedHeight(50);
+    table_number_label->setAlignment(Qt::AlignCenter);
+    order_time_label->setStyleSheet("font-size: 20px;");
+    table_number_label->setStyleSheet("font-size: 20px;");
+    order_info_layout->addWidget(order_time_label);
+    order_info_layout->addWidget(table_number_label);
+    card_layout->addLayout(order_info_layout);
+
+    for (const auto& item : menu_items) {
+        QLabel* menu_label = new QLabel(QString("  • %1").arg(item));
+        menu_label->setStyleSheet("font-size: 20px;");
+        menu_label->setFixedHeight(50);
+        card_layout->addWidget(menu_label);
+    }
+
+    QPushButton* cancel_button = new QPushButton("Cancel Order");
+    cancel_button->setStyleSheet(R"(
+        background-color: red;
+        color: white;
+        font-size: 20px;
+        padding: 5px 10px;
+        border-radius: 5px;
+    )");
+    connect(cancel_button, &QPushButton::clicked, [=]() {
+        cancel_order(order_id, table_number, "Cancelled");
+    });
+    card_layout->addWidget(cancel_button);
+
+    QPushButton* complete_button = new QPushButton("Complete Order");
+    complete_button->setStyleSheet(R"(
+        background-color: blue;
+        color: white;
+        font-size: 20px;
+        padding: 5px 10px;
+        border-radius: 5px;
+    )");
+    connect(complete_button, &QPushButton::clicked, [=]() {
+        call_amr(order_id, table_number, "Completed");
+    });
+    card_layout->addWidget(complete_button);
+
+    card->setLayout(card_layout);
+    card->setStyleSheet(R"(
+        QGroupBox {
+            background-color: white;
+            border: 2px solid green;
+            border-radius: 10px;
+            padding: 15px;
+        }
+    )");
+
+    return card;
+}
+
 void KitchenDisplay::call_amr(int order_id, int table_number, const QString &status)
 {
     // GoalLoc 서비스 호출
@@ -176,102 +281,66 @@ void KitchenDisplay::call_amr(int order_id, int table_number, const QString &sta
         auto result = result_future.get();
         qDebug() << "Navigation Result:" << result->send_result
                  << "x:" << result->x << "y:" << result->y;
-
-        // 주문 상태 업데이트
-        update_order_status(order_id, "Completed");
     }
     else
     {
         qDebug() << "Navigation failed";
     }
+
+    // 주문 상태를 'Completed'로 업데이트하기 위해 API 호출
+    QString api_url = QString("%1/order/%2/Completed").arg(api_base_url_).arg(order_id);
+
+    http_client client(U(api_url.toStdString()));
+    client.request(methods::PUT)
+        .then([](http_response response) {
+            if (response.status_code() == status_codes::OK) {
+                qDebug() << "Order status updated to 'Completed'";
+            } else {
+                qDebug() << "Failed to update order status";
+            }
+        })
+        .wait();
 }
 
-// 매출 정보를 로드하는 함수 추가 (SalesWindow 클래스 내부)
-void SalesWindow::create_graph(const QString &sales_type)
+void KitchenDisplay::cancel_order(int order_id, int table_number, const QString &status)
 {
-    qDebug() << "sales_type:" << sales_type;
+    // CancelService 서비스 호출
+    auto request = std::make_shared<pizza_order_msgs::srv::CancelService::Request>();
+    request->order_id = order_id;
+    request->table_number = table_number;
 
-    try {
-        http_client client(U(api_base_url_.toStdString()));
+    auto result_future = service_node_->cancel_client_->async_send_request(request);
 
-        // sales_type 값을 소문자로 변환
-        QString sales_type_lower = sales_type.toLower();
-
-        // 매출액 데이터 요청
-        uri_builder builder(U("/sales/" + sales_type_lower.toStdString()));
-        auto sales_response = client.request(methods::GET, builder.to_string()).get();
-
-        // 메뉴별 판매량 데이터 요청
-        uri_builder menu_builder(U("/menu_sales/" + sales_type_lower.toStdString()));
-        auto menu_sales_response = client.request(methods::GET, menu_builder.to_string()).get();
-
-        if (sales_response.status_code() != status_codes::OK) {
-            qDebug() << "[ERROR] Failed to fetch sales data:" << sales_response.status_code();
-            return;
+    // 결과 처리
+    if (rclcpp::spin_until_future_complete(service_node_, result_future) ==
+        rclcpp::FutureReturnCode::SUCCESS)
+    {
+        auto response = result_future.get();
+        if (response->status == "Cancelled")
+        {
+            QMessageBox::information(this, "주문 취소", QString("주문 번호: %1번\n주문이 취소되었습니다.\n테이블 번호: %2").arg(order_id).arg(table_number));
         }
-        if (menu_sales_response.status_code() != status_codes::OK) {
-            qDebug() << "[ERROR] Failed to fetch menu sales data:" << menu_sales_response.status_code();
-            return;
+        else
+        {
+            QMessageBox::warning(this, "주문 취소 실패", "주문 취소 요청이 실패했습니다.");
         }
-
-        // 응답 데이터 파싱
-        auto sales_json = sales_response.extract_json().get();
-        auto menu_sales_json = menu_sales_response.extract_json().get();
-
-        // 매출액 데이터
-        std::vector<QString> labels;
-        std::vector<double> sales_values;
-
-        auto labels_array = sales_json.at(U("labels")).as_array();
-        auto sales_array = sales_json.at(U("sales")).as_array();
-
-        for (auto& label : labels_array) {
-            labels.push_back(QString::fromStdString(label.as_string()));
-        }
-        for (auto& sales : sales_array) {
-            sales_values.push_back(sales.as_double());
-        }
-
-        // 메뉴별 판매량 데이터
-        std::vector<QString> menu_names;
-        std::vector<double> menu_sales_values;
-
-        auto menu_names_array = menu_sales_json.at(U("menu_names")).as_array();
-        auto menu_sales_array = menu_sales_json.at(U("menu_sales")).as_array();
-
-        for (auto& name : menu_names_array) {
-            menu_names.push_back(QString::fromStdString(name.as_string()));
-        }
-        for (auto& menu_sale : menu_sales_array) {
-            menu_sales_values.push_back(menu_sale.as_double());
-        }
-
-        qDebug() << "[DEBUG] Parsed Sales Data:" << labels << sales_values;
-        qDebug() << "[DEBUG] Parsed Menu Sales Data:" << menu_names << menu_sales_values;
-
-        // 그래프 그리기
-        this->figure.clear();
-
-        // 상단: 매출액 그래프
-        auto ax1 = this->figure.add_subplot(211);
-        ax1->bar(labels.begin(), labels.end(), sales_values.begin(), sales_values.end(), "green");
-        ax1->set_title("매출액", "fontsize=18", "fontweight='bold'");
-        ax1->set_ylabel("금액(원)", "fontsize=18", "fontweight='bold'", "rotation=0", "labelpad=45");
-        ax1->grid(true);
-
-        // 하단: 메뉴별 판매량 그래프
-        auto ax2 = this->figure.add_subplot(212);
-        ax2->bar(menu_names.begin(), menu_names.end(), menu_sales_values.begin(), menu_sales_values.end(), "orange");
-        ax2->set_title("판매량", "fontsize=18", "fontweight='bold'");
-        ax2->set_ylabel("수량(개)", "fontsize=18", "fontweight='bold'", "rotation=0", "labelpad=70");
-        ax2->set_xticklabels(menu_names);
-        ax2->grid(true);
-
-        // 그래프 업데이트
-        this->canvas.draw();
-
-    } catch (const std::exception& e) {
-        qDebug() << "Error:" << e.what();
-        return;
     }
+    else
+    {
+        QMessageBox::critical(this, "오류 발생", "주문 취소 처리 중 오류가 발생했습니다.");
+    }
+
+    // 주문 상태를 'Cancelled'로 업데이트하기 위해 API 호출
+    QString api_url = QString("%1/order/%2/Cancelled").arg(api_base_url_).arg(order_id);
+
+    http_client client(U(api_url.toStdString()));
+    client.request(methods::PUT)
+        .then([](http_response response) {
+            if (response.status_code() == status_codes::OK) {
+                qDebug() << "Order status updated to 'Cancelled'";
+            } else {
+                qDebug() << "Failed to update order status";
+            }
+        })
+        .wait();
 }
