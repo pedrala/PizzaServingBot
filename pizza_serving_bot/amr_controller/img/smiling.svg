@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Black background -->
+  <rect width="200" height="200" fill="black"/>
+  
+  <!-- Two separate curved eyes with wider spacing -->
+  <path d="M40 80 Q60 60, 80 80" fill="none" stroke="white" stroke-width="5"/>
+  <path d="M120 80 Q140 60, 160 80" fill="none" stroke="white" stroke-width="5"/>
+  
+  <!-- Wide smiling mouth -->
+  <path d="M50 130 Q100 180, 150 130" fill="none" stroke="white" stroke-width="5"/>
+</svg>

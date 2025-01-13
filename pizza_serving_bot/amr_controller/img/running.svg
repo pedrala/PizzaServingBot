@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Black background -->
+  <rect width="200" height="200" fill="black"/>
+  
+  <!-- Sweating shy face -->
+  <text x="100" y="100" font-family="Arial" font-size="120" text-anchor="middle" fill="white">^_^;</text>
+</svg>
