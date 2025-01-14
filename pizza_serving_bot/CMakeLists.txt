@@ -4,6 +4,7 @@ project(pizza_serving_bot)
 # C++ 표준 설정
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # 패키지의 종속성 찾기
 find_package(ament_cmake REQUIRED)
@@ -17,6 +18,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(Qt5 REQUIRED COMPONENTS Core Sql)
 
 # Qt5 Widgets 종속성 찾기
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
@@ -40,6 +42,8 @@ add_executable(amr_controller_node
 
 ament_target_dependencies(amr_controller_node
   rclcpp
+  nav2_msgs
+  pizza_order_msgs
   std_msgs
   nav_msgs
   geometry_msgs
@@ -66,6 +70,7 @@ ament_target_dependencies(kitchen_monitor_node
 
 target_link_libraries(kitchen_monitor_node
   Qt5::Widgets
+  Qt5::Core Qt5::Sql
   cpprest
 )
 
@@ -87,6 +92,7 @@ ament_target_dependencies(table_order_node
 
 target_link_libraries(table_order_node
   Qt5::Widgets
+  Qt5::Core Qt5::Sql
 )
 
 target_include_directories(table_order_node PUBLIC
