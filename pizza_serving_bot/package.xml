@@ -21,6 +21,7 @@
   <build_depend>pizza_order_msgs</build_depend>
   <build_depend>cpprestsdk</build_depend>
   <build_depend>OpenCV</build_depend>
+  
 
   <!-- 실행 의존성 -->
   <exec_depend>rclcpp</exec_depend>
@@ -33,6 +34,7 @@
   <exec_depend>pizza_order_msgs</exec_depend>
   <exec_depend>cpprestsdk</exec_depend>
   <exec_depend>OpenCV</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
